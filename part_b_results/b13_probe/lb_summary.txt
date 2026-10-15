@@ -1,0 +1,13 @@
+[LB] listening on 127.0.0.1:8000 | algo=probe | backends=4
+[LB] started 4 health probers (interval=1000ms)
+
+[LB] shutting down, draining in-flight exchanges...
+[LB] health probers stopped
+===== Load Balancer Shutdown Summary =====
+Algorithm: probe
+  backend_9001 (127.0.0.1:9001): forwarded=144 connectAttempts=144 failedExchanges=0
+  backend_9002 (127.0.0.1:9002): forwarded=358 connectAttempts=358 failedExchanges=0
+  backend_9003 (127.0.0.1:9003): forwarded=251 connectAttempts=251 failedExchanges=0
+  backend_9004 (127.0.0.1:9004): forwarded=251 connectAttempts=251 failedExchanges=0
+Total forwarded: 1004
+Total failed:    0

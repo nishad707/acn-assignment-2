@@ -284,9 +284,11 @@ bool parseLoadBalancerArguments(int argc, char* argv[], LoadBalancerOptions &opt
             }
             options.algorithm = argv[++i];
             // Validate the algorithm name up front (B11: selectable at startup).
-            if (options.algorithm != LB_ALGO_ROUNDRR) {
+            if (options.algorithm != LB_ALGO_PROBE &&
+                options.algorithm != LB_ALGO_INFLIGHT &&
+                options.algorithm != LB_ALGO_ROUNDRR) {
                 cerr << "error: invalid --algo value: " << options.algorithm
-                     << " (expected roundrobin)" << endl;
+                     << " (expected probe, inflight or roundrobin)" << endl;
                 return false;
             }
         } else if (argument == LB_ARG_CONFIG) {

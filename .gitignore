@@ -26,3 +26,9 @@ client_files/
 filestore/
 backend_configs/
 lb_metrics/
+
+# Verbose per-backend debug logs + pid files from experiments (keep health.csv,
+# metrics_*.csv, lb_summary.txt, lb.log as deliverables)
+part_b_results/*/backend_90*.log
+part_b_results/*/backend_pids
+part_b_results/*/lb.pid
