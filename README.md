@@ -179,16 +179,147 @@ Generated charts in `./plots/`:
 
 ---
 
+# Part B — Load Balancer
+
+A concurrent TCP **load balancer** that sits in front of four independent
+Part A server instances ("backends"), forwards `PUT`/`GET` transparently,
+health-checks the backends, and steers each request using a selectable
+algorithm. The unmodified Part A client works against the LB with only the
+config file changed (B2 transparency).
+
+## B.1 Build
+
+`make` now builds all three binaries: `build/server`, `build/client`, and
+`build/load_balancer`.
+
+```bash
+make clean && make
+```
+
+## B.2 Configuration
+
+The LB reads the `load_balancer` section of `config.json` (ip, port,
+`health_interval_ms`, and the four `backends`). The Part A client is pointed
+at the LB with a *separate* config whose `server.ip`/`server.port` point at
+the LB (`backend_configs/config_lb.json`, generated automatically):
+
+```bash
+./build/client get report.txt --config backend_configs/config_lb.json
+```
+
+Each backend is its own Part A server on its own port, started with its own
+generated config (`backend_configs/backend_<port>.json`). The generator
+carries the `load_balancer` section into each backend config verbatim (the
+shared parser requires every field, though the server binary ignores it).
+
+## B.3 Running
+
+```bash
+# 1. Start the four backends (backend #1 slow for B13; shared file store).
+./scripts/start_backends.sh --sched rr --quantum 4096 --slow-backend 1
+
+# 2. Start the load balancer (pick the algorithm, B11).
+./build/load_balancer --algo probe    --config config.json --health-log health.csv
+./build/load_balancer --algo inflight --config config.json --health-log health.csv
+./build/load_balancer --algo roundrobin --config config.json --health-log health.csv
+
+# 3. Use the unmodified Part A client against the LB.
+./build/client load workload --requests 1000 --config backend_configs/config_lb.json
+
+# 4. Stop the LB (Ctrl-C / SIGINT) -> graceful drain + per-backend counts.
+./scripts/stop_backends.sh
+```
+
+### Selecting each algorithm (B11)
+`--algo <probe|inflight|roundrobin>` selects the algorithm at startup
+(default `roundrobin`). The two required algorithms differ in the *kind of
+state* they read (B12):
+
+* **`probe`** — *probe-cadence state*: the minimum last-reported scheduler
+  queue depth (B8), refreshed only once per health interval.
+* **`inflight`** — *real-time state*: the minimum number of requests currently
+  in flight to each backend, updated on every dispatch and completion.
+* **`roundrobin`** — stateless baseline (the allowed third algorithm).
+
+## B.4 Health-check design (B7–B10)
+
+* **One prober thread per backend** (B7), so the four probes are fully
+  independent — a slow/hung probe of one backend never delays the others.
+* Each cycle sends `HEALTH\n` and reads the reply (the backend's current
+  scheduler queue depth, B8). A probe **fails** (`status=down`) on a
+  connection error, a malformed reply, or no complete reply within one health
+  interval (B7).
+* Every probe is appended to the health log with columns
+  `timestamp,backend,status,rtt_ms,queue_depth` (B9). Design choices:
+  `timestamp` is **epoch milliseconds**; `queue_depth` is **-1** for a failed
+  probe; `rtt_ms` is integer milliseconds (monotonic clock).
+* A failed probe marks the backend **unhealthy** (excluded from selection); a
+  later successful probe restores it to service (B10).
+* On `SIGINT`/`SIGTERM` the LB stops accepting, drains in-flight exchanges,
+  stops the probers, and prints the per-backend forwarded counts (B5).
+
+## B.5 Failure semantics (B6)
+
+* Backend failure **before** any response byte is forwarded → the LB replies
+  `ERR <reason>` and closes the connection.
+* Backend failure **after** response bytes have started → the LB closes the
+  client connection; the client detects the failure as a **short read** (the
+  body is a raw byte stream with no room for an error message).
+* On a pre-response backend failure the LB does **not** retry another backend
+  (a strict reading of B6); it marks the backend unhealthy so selection
+  excludes it, and replies `ERR`.
+
+## B.6 Key design choices (documented per the ground rules)
+
+* **Shared file store:** all four backends use one `--file` directory. Since
+  the LB is transparent with no sticky sessions, a `GET` can land on any
+  backend, so every backend must be able to serve every file. The load
+  client's seeding `PUT`s populate the shared store once.
+* **No pre-response retry** (see B.5 above).
+* **Least-X selection tie-break:** among backends sharing the minimum metric,
+  a round-robin scan spreads ties fairly (a deterministic lowest-index
+  tie-break would structurally starve higher-index backends). Selection is a
+  single pass, which avoids a TOCTOU race (a two-phase "compute min, then
+  pick among the minima" can wrongly report no backend when the in-flight
+  count changes between phases).
+
+## B.7 Reproducing the Part B experiments
+
+```bash
+# B13: per-backend distribution, one deliberately slow backend (backend #1).
+./tests/lb/run_b13.sh probe        part_b_results/b13_probe     --requests 1000
+./tests/lb/run_b13.sh inflight     part_b_results/b13_inflight  --requests 1000
+./tests/lb/run_b13.sh roundrobin   part_b_results/b13_rr        --requests 1000
+python3 tests/lb/analyze_b13.py \
+    --runs probe:part_b_results/b13_probe \
+           inflight:part_b_results/b13_inflight \
+           roundrobin:part_b_results/b13_rr \
+    --out-plot plots/b13_distribution.png \
+    --out-table part_b_results/b13_table.txt
+
+# B14: fault injection (kill -9 one backend mid-load, then restart it).
+./tests/lb/run_b14.sh part_b_results/b14_inflight --requests 5000 --algo inflight
+python3 tests/lb/analyze_b14.py part_b_results/b14_inflight
+```
+
+Experiment artifacts (per-run health logs, per-backend metrics CSVs, LB
+summaries, client logs, and the B13 table/plot) live in `part_b_results/`.
+
+---
+
 ## 6. Project Structure
 ```text
 .
-├── Makefile                     # Build targets for server and client
+├── Makefile                     # Build targets for server, client, load_balancer
 ├── README.md                    # Project documentation & reproduction guide
 ├── config.json                  # Reference configuration file
 ├── include/                     # C++ header files
 │   ├── cli.hpp
 │   ├── config.hpp
 │   ├── framing.hpp
+│   ├── lb_io.hpp                # (Part B) buffered socket + connect helper
+│   ├── load_balancer.hpp        # (Part B) Backend state + shared LB globals
+│   ├── nlohmann/json.hpp        # vendored single-header JSON parser
 │   ├── request.hpp
 │   ├── request_handler.hpp
 │   ├── response.hpp
@@ -199,22 +330,33 @@ Generated charts in `./plots/`:
 │   ├── client.cpp
 │   ├── config.cpp
 │   ├── framing.cpp
+│   ├── lb_health.cpp            # (Part B) independent per-backend probers (B7-B10)
+│   ├── lb_io.cpp                # (Part B) buffered socket implementation
+│   ├── lb_proxy.cpp             # (Part B) per-connection transparent proxy (B1/B2/B6)
+│   ├── lb_select.cpp            # (Part B) selection algorithms (B11/B12)
+│   ├── load_balancer.cpp        # (Part B) LB main: accept loop, shutdown (B4/B5)
 │   ├── request.cpp
 │   ├── request_handler.cpp
 │   ├── response.cpp
 │   ├── scheduler.cpp
 │   ├── server.cpp
 │   └── util.cpp
+├── scripts/                     # (Part B) helper scripts
+│   ├── gen_backend_configs.py   # generate backend + LB-client configs
+│   ├── start_backends.sh        # start the four backends
+│   └── stop_backends.sh         # stop the backends gracefully
 ├── tests/                       # Unit tests & experiment scripts
 │   ├── analyze_metrics.py
 │   ├── generate_plots.py
 │   ├── generate_workload.py
 │   ├── run_experiments.py
-│   ├── test_cli.cpp
-│   ├── test_framing.cpp
-│   ├── test_parser.cpp
-│   └── test_response.cpp
+│   └── lb/                      # (Part B) experiments
+│       ├── analyze_b13.py       # per-backend distribution table + plot
+│       ├── analyze_b14.py       # fault-injection analysis
+│       ├── run_b13.sh           # B13 distribution experiment runner
+│       └── run_b14.sh           # B14 fault-injection runner
 ├── workload/                    # Generated workload text files
-├── experiment_results/          # Exported metrics CSVs and summary JSON
-└── plots/                       # Generated comparison charts
+├── experiment_results/          # (Part A) metrics CSVs and summary JSON
+├── part_b_results/              # (Part B) B13/B14 logs, metrics, summaries
+└── plots/                       # Generated comparison charts (Part A + B13)
 ```
