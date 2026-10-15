@@ -5,9 +5,9 @@
 [LB] health probers stopped
 ===== Load Balancer Shutdown Summary =====
 Algorithm: inflight
-  backend_9001 (127.0.0.1:9001): forwarded=179 connectAttempts=179 failedExchanges=0
-  backend_9002 (127.0.0.1:9002): forwarded=275 connectAttempts=275 failedExchanges=0
-  backend_9003 (127.0.0.1:9003): forwarded=270 connectAttempts=270 failedExchanges=0
-  backend_9004 (127.0.0.1:9004): forwarded=280 connectAttempts=280 failedExchanges=0
+  backend_9001 (127.0.0.1:9001): forwarded=176 connectAttempts=176 failedExchanges=0
+  backend_9002 (127.0.0.1:9002): forwarded=274 connectAttempts=274 failedExchanges=0
+  backend_9003 (127.0.0.1:9003): forwarded=285 connectAttempts=285 failedExchanges=0
+  backend_9004 (127.0.0.1:9004): forwarded=269 connectAttempts=269 failedExchanges=0
 Total forwarded: 1004
 Total failed:    0

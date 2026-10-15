@@ -16,78 +16,74 @@
  *
  *   "roundrobin" — stateless baseline (allowed as a third algorithm, B12).
  *
- * Both "least-X" algorithms break ties with a round-robin scan among the
- * backends that share the minimum value, so no backend is structurally
- * starved by the tie-break (a deterministic lowest-index tie-break would
- * always let the lower-index backends win). Selection is lock-free: the state
- * lives in std::atomic members, so a handler can pick a backend while probers
- * refresh health concurrently (B4).
+ * Selection is a single pass in round-robin order: it tracks the minimum
+ * metric seen and, on a tie, keeps the backend nearest the (advancing) cursor.
+ * As the cursor advances, the "nearest minimum" rotates, which spreads ties
+ * fairly (no backend is structurally starved) without a second pass. A single
+ * pass also avoids a TOCTOU race: a two-phase "compute min, then pick among
+ * the minima" can return -1 when the metric (in-flight) changes between the
+ * two phases even though healthy backends exist. Here, as long as at least one
+ * healthy backend exists, a valid one is always returned. Selection is
+ * lock-free: the state lives in std::atomic members (B4).
  */
 #include "load_balancer.hpp"
 
 #include <climits>
 
 /**
- * Pick a healthy backend whose metric equals `minValue`, scanning forward
- * from the shared round-robin cursor so ties are spread fairly. Returns -1 if
- * no healthy backend has that (minimum) value.
+ * Single-pass "least-X" selection with a round-robin tie-break.
+ *
+ * `metric` returns the (non-negative) value to minimise for a backend. The
+ * pass scans in round-robin order from the shared cursor; a strictly smaller
+ * value replaces the current best, so among equal minima the one closest to
+ * the cursor wins — and as the cursor advances, that rotates among the tied
+ * backends. Returns -1 only if no healthy backend exists.
  */
-static int pickAmongMinima(bool (*metricIsMin)(const Backend &, long long),
-                           long long minValue) {
+template <typename Metric>
+static int selectLeast(const Metric &metric) {
     const size_t n = lb::backends.size();
     if (n == 0) {
         return -1;
     }
     uint64_t start = lb::roundRobinCursor.fetch_add(1) % n;
+    long long best = LLONG_MAX;
+    int bestIdx = -1;
     for (size_t i = 0; i < n; i++) {
         size_t idx = (start + i) % n;
         const Backend &b = lb::backends[idx];
-        if (b.healthy.load() && metricIsMin(b, minValue)) {
-            return static_cast<int>(idx);
+        if (!b.healthy.load()) {
+            continue;
+        }
+        long long v = metric(b);
+        if (v < best) {  // strict < keeps the closest-to-cursor backend on ties
+            best = v;
+            bestIdx = static_cast<int>(idx);
         }
     }
-    return -1;
+    return bestIdx;
 }
 
 int lbSelectBackend() {
-    const size_t n = lb::backends.size();
-    if (n == 0) {
-        return -1;
-    }
-
     if (lb::options.algorithm == LB_ALGO_PROBE) {
         // Probe-cadence state: the minimum last reported queue depth (B8/B12).
-        long long best = LLONG_MAX;
-        for (size_t i = 0; i < n; i++) {
-            const Backend &b = lb::backends[i];
-            if (b.healthy.load()) {
-                long long d = b.lastQueueDepth.load();
-                if (d < best) best = d;
-            }
-        }
-        if (best == LLONG_MAX) return -1;  // no healthy backend
-        return pickAmongMinima([](const Backend &b, long long m) {
-            return b.lastQueueDepth.load() == m;
-        }, best);
+        return selectLeast([](const Backend &b) {
+            return b.lastQueueDepth.load();
+        });
     }
 
     if (lb::options.algorithm == LB_ALGO_INFLIGHT) {
         // Real-time state: the minimum in-flight request count (B12).
-        long long best = LLONG_MAX;
-        for (size_t i = 0; i < n; i++) {
-            const Backend &b = lb::backends[i];
-            if (b.healthy.load()) {
-                long long f = b.inFlight.load();
-                if (f < best) best = f;
-            }
-        }
-        if (best == LLONG_MAX) return -1;  // no healthy backend
-        return pickAmongMinima([](const Backend &b, long long m) {
-            return b.inFlight.load() == m;
-        }, best);
+        return selectLeast([](const Backend &b) {
+            return b.inFlight.load();
+        });
     }
 
-    // Default: stateless round-robin baseline (B11/B12).
+    // Default: stateless round-robin baseline (B11/B12) — first healthy
+    // backend from the cursor.
+    const size_t n = lb::backends.size();
+    if (n == 0) {
+        return -1;
+    }
     uint64_t start = lb::roundRobinCursor.fetch_add(1) % n;
     for (size_t i = 0; i < n; i++) {
         size_t idx = (start + i) % n;
