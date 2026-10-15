@@ -262,3 +262,49 @@ bool loadArgValuesInClientOptions(
 bool nextIndexValid(int argc, int currentIndex) {
     return (currentIndex + 1) < argc;
 }
+
+/**
+ * Part B: parse the load balancer command line (B11).
+ *
+ * Flags:
+ *   --algo <probe|inflight|roundrobin>   selection algorithm (default: roundrobin)
+ *   --config <path>                      config file (default config.json)
+ *   --health-log <path>                  health log file (default health_log.csv)
+ *
+ * Returns true on success; prints a clear error and returns false otherwise.
+ */
+bool parseLoadBalancerArguments(int argc, char* argv[], LoadBalancerOptions &options) {
+    for (int i = 1; i < argc; i++) {
+        std::string argument = argv[i];
+
+        if (argument == LB_ARG_ALGO) {
+            if (!nextIndexValid(argc, i)) {
+                cerr << "error: missing value for " << argument << endl;
+                return false;
+            }
+            options.algorithm = argv[++i];
+            // Validate the algorithm name up front (B11: selectable at startup).
+            if (options.algorithm != LB_ALGO_ROUNDRR) {
+                cerr << "error: invalid --algo value: " << options.algorithm
+                     << " (expected roundrobin)" << endl;
+                return false;
+            }
+        } else if (argument == LB_ARG_CONFIG) {
+            if (!nextIndexValid(argc, i)) {
+                cerr << "error: missing value for " << argument << endl;
+                return false;
+            }
+            options.configPath = argv[++i];
+        } else if (argument == LB_ARG_HEALTH_LOG) {
+            if (!nextIndexValid(argc, i)) {
+                cerr << "error: missing value for " << argument << endl;
+                return false;
+            }
+            options.healthLogPath = argv[++i];
+        } else {
+            cerr << "error: unknown argument " << argument << endl;
+            return false;
+        }
+    }
+    return true;
+}

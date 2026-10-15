@@ -21,3 +21,8 @@ bin/
 
 files/
 client_files/
+
+# Part B scratch (regenerated each run; experiment deliverables live in part_b_results/)
+filestore/
+backend_configs/
+lb_metrics/

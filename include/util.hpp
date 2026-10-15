@@ -19,6 +19,22 @@ constexpr const char* SCHED_SJF = "sjf";
 constexpr const char* SCHED_ROUND_ROBIN = "rr";
 constexpr const char* SCHED_DRR = "drr";
 
+// Load balancer CLI flags (Part B, B11: algorithms selectable at startup).
+constexpr const char* LB_ARG_ALGO = "--algo";
+constexpr const char* LB_ARG_CONFIG = "--config";
+constexpr const char* LB_ARG_HEALTH_LOG = "--health-log";
+
+// The three selectable load-balancing algorithms (B11/B12).
+// "probe"    : probe-cadence state (last reported queue depth, refreshed once
+//              per health interval) — the B12 "probe-cadence" arm.
+// "inflight" : real-time state observed at the LB itself (requests currently
+//              in flight to each backend, updated on every dispatch/completion)
+//              — the B12 "real-time" arm.
+// "roundrobin": baseline that reads no state (allowed as a third algorithm).
+constexpr const char* LB_ALGO_PROBE = "probe";
+constexpr const char* LB_ALGO_INFLIGHT = "inflight";
+constexpr const char* LB_ALGO_ROUNDRR = "roundrobin";
+
 constexpr const char* REQUEST_GET = "GET";
 constexpr const char* REQUEST_PUT = "PUT";
 constexpr const char* REQUEST_HEALTH = "HEALTH";
