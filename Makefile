@@ -19,7 +19,8 @@ COMMON = src/config.cpp \
 LB_COMMON = $(COMMON) \
             src/lb_io.cpp \
             src/lb_select.cpp \
-            src/lb_proxy.cpp
+            src/lb_proxy.cpp \
+            src/lb_health.cpp
 
 all: $(SERVER) $(CLIENT) $(LB)
 

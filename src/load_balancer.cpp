@@ -121,8 +121,8 @@ int main(int argc, char *argv[]) {
               << " | algo=" << lb::options.algorithm
               << " | backends=" << lb::backends.size() << std::endl;
 
-    // (B2) Health probers start here once that section is implemented:
-    // lbStartHealthProbers();
+    // (B2) Start one independent health prober per backend.
+    lbStartHealthProbers();
 
     // ---- accept loop ----
     while (!lb::stopRequested.load()) {
@@ -155,8 +155,8 @@ int main(int argc, char *argv[]) {
         lb::activeCv.wait(lock, [] { return lb::activeHandlers.load() == 0; });
     }
 
-    // (B2) Stop health probers once traffic has drained:
-    // lbStopHealthProbers();
+    // (B2) Stop health probers once traffic has drained.
+    lbStopHealthProbers();
 
     // ---- shutdown summary (B5): per-backend forwarded counts ----
     std::cout << "===== Load Balancer Shutdown Summary =====" << std::endl;
